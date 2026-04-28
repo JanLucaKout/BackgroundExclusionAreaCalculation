@@ -1,5 +1,6 @@
 # Area Calculation by Background Exclusion
 Calculate the desired area in images by filtering out the Background using HSV-Values.
+
 In an interactable GUI you can select the following:
 - Input Folder: The folder containing images in the .jpg, .jpeg or .tif format.
 - Output Folder: The folder for the resulting .csv file and overlay images.
