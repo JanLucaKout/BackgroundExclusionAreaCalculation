@@ -1,7 +1,7 @@
 """
 # This scripts extracts the desired total area by using the background exclusion method.
 Created in April 2026
-@author: JLK
+@author: Jan Luca Kout
 """
 
 #################################################################################
@@ -24,20 +24,22 @@ VALID_EXTENSIONS = ('.jpg', '.jpeg', '.tif')
 RESULT_IMAGE_NAME_EXTENSION = '_InverseArea.jpg'
 CSV_FILE_NAME = "total_areas.csv"
 
-# Standard Values
 # Background HSV [Hue, Saturation, Value]
 # Full Hue Scale (0-179, Min. 0, Max. 179)
 # Low Saturation (0-40, Min. 0, Max. 255)
 # Value must be above a certain point to exclude dark shadows (70-255, Min. 0, Max. 255)
 
+# Standard Values Lower Range
 BGR_LOWER_HUE = 0
 BGR_LOWER_SAT = 0
 BGR_LOWER_VAL = 70
 
+# Standard Values Upper Range
 BGR_UPPER_HUE = 179
 BGR_UPPER_SAT = 30
 BGR_UPPER_VAL = 255
 
+# Standard Values Color Overlay (Magenta)
 COLOR_RED = 255
 COLOR_GREEN = 0
 COLOR_BLUE = 255
@@ -50,11 +52,10 @@ def update_and_validate_background_settings(settings_dictionary):
 		COLOR_GREEN, COLOR_BLUE
 
 	try:
-		# 1. Convert all strings to integers
-		# This catches empty strings or accidental non-numeric input
+		# Convert all strings to integers
 		vals = {k: int(v) for k, v in settings_dictionary.items()}
 
-		# 2. Check Absolute HSV Ranges
+		# Check Absolute HSV/RGB Ranges
 		# Hue is 0-179, others are 0-255
 		if not (0 <= vals['lower_hue'] <= 179 and 0 <= vals['upper_hue'] <= 179):
 			raise ValueError("Hue must be between 0 and 179.")
@@ -63,8 +64,7 @@ def update_and_validate_background_settings(settings_dictionary):
 			if not (0 <= vals[k] <= 255):
 				raise ValueError(f"{k.replace('_', ' ').title()} must be between 0 and 255.")
 
-		# 3. Check Logical Ranges (Lower must be <= Upper)
-		# If lower > upper, OpenCV returns an empty mask, which looks like 0 area.
+		# Check Logical Ranges (Lower must be <= Upper)
 		if vals['lower_hue'] > vals['upper_hue']:
 			raise ValueError("Lower Hue cannot be greater than Upper Hue.")
 		if vals['lower_sat'] > vals['upper_sat']:
@@ -72,7 +72,7 @@ def update_and_validate_background_settings(settings_dictionary):
 		if vals['lower_val'] > vals['upper_val']:
 			raise ValueError("Lower Value cannot be greater than Upper Value.")
 
-		# 4. Successful Validation -> Assign to Globals
+		# Successful Validation -> Assign to Globals
 		BGR_LOWER_HUE, BGR_UPPER_HUE = vals['lower_hue'], vals['upper_hue']
 		BGR_LOWER_SAT, BGR_UPPER_SAT = vals['lower_sat'], vals['upper_sat']
 		BGR_LOWER_VAL, BGR_UPPER_VAL = vals['lower_val'], vals['upper_val']
@@ -84,7 +84,7 @@ def update_and_validate_background_settings(settings_dictionary):
 		return True
 
 	except ValueError as e:
-		# Catch conversion errors (like letters) or our custom range errors
+		# Catch conversion errors or custom range errors
 		messagebox.showerror("Validation Error", str(e))
 		return False
 
@@ -103,13 +103,15 @@ def get_dpi(image_file):
 
 
 def generate_overlay_image(cv2_image_file, mask, base_name, output_path, area_cm2, dpi, settings_list):
-	# 1. Create the Magenta Overlay
+
+	# Create a copy of the image
 	overlay = cv2_image_file.copy()
+
+	# Create a colored overlay
 	overlay[mask == 255] = [COLOR_RED, COLOR_GREEN, COLOR_BLUE]
 	visual_check = cv2.addWeighted(cv2_image_file, 0.7, overlay, 0.3, 0)
 
-	# 2. Prepare the Metadata Text
-	# hsv_settings could be a string like "S: 0-40, V: 70-255"
+	# Prepare the Metadata Text
 	lines = [
 		'Background Exclusion Area Calculation',
 		f"File: {base_name}",
@@ -120,11 +122,12 @@ def generate_overlay_image(cv2_image_file, mask, base_name, output_path, area_cm
 	for setting in settings_list:
 		lines.append(setting)
 
-	# 3. Draw Text onto the Image
+	# Draw Text onto the Image
 	font = cv2.FONT_HERSHEY_SIMPLEX
-	font_scale = 1.2  # Adjusted for 300 DPI
+	font_scale = 1.2
 	thickness = 2
-	x, y = 50, 80     # Starting coordinates
+	# Starting coordinates
+	x, y = 50, 80
 
 	for i, line in enumerate(lines):
 		# Calculate vertical position for each line
@@ -135,7 +138,7 @@ def generate_overlay_image(cv2_image_file, mask, base_name, output_path, area_cm
 		# Draw White Text
 		cv2.putText(visual_check, line, (x, line_y), font, font_scale, (255, 255, 255), thickness)
 
-	# 4. Save
+	# Save
 	output_filename = f"{base_name}{RESULT_IMAGE_NAME_EXTENSION}"
 	cv2.imwrite(os.path.join(output_path, output_filename), visual_check)
 
@@ -143,8 +146,6 @@ def generate_overlay_image(cv2_image_file, mask, base_name, output_path, area_cm
 def get_area_by_background_exclusion(cv2_image_file, dpi):
 
 	# Convert to HSV
-	# HSV is better than RGB for defining "White/Grey" because
-	# we can just target the "Saturation" and "Value" channels.
 	hsv = cv2.cvtColor(cv2_image_file, cv2.COLOR_BGR2HSV)
 
 	# Define the Background Range
@@ -174,13 +175,10 @@ def export_results_to_csv(data_dict, output_folder):
 
 	try:
 		with open(file_path, mode='w', newline='') as csvfile:
-			# We use delimiter=';' to match your existing data pipeline
 			writer = csv.writer(csvfile, delimiter=';')
 
-			# Write the header row
 			writer.writerow(headers)
 
-			# Write the data rows
 			for sample_name, area in data_dict.items():
 				writer.writerow([sample_name, f"{area:.6f}"])
 
