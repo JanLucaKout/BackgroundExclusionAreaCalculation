@@ -44,12 +44,15 @@ COLOR_RED = 255
 COLOR_GREEN = 0
 COLOR_BLUE = 255
 
+# Filter Contours
+FILTER_CONTOURS = True
+
 #################################################################################
 # Area Extraction Methods
 
 def update_and_validate_background_settings(settings_dictionary):
 	global BGR_LOWER_HUE, BGR_LOWER_SAT, BGR_LOWER_VAL, BGR_UPPER_HUE, BGR_UPPER_SAT, BGR_UPPER_VAL, COLOR_RED, \
-		COLOR_GREEN, COLOR_BLUE
+		COLOR_GREEN, COLOR_BLUE, FILTER_CONTOURS
 
 	try:
 		# Convert all strings to integers
@@ -79,6 +82,7 @@ def update_and_validate_background_settings(settings_dictionary):
 		COLOR_RED = vals['red']
 		COLOR_GREEN = vals['green']
 		COLOR_BLUE = vals['blue']
+		FILTER_CONTOURS = vals['filter_contours']
 
 		print("Settings successfully updated and validated.")
 		return True
@@ -143,27 +147,51 @@ def generate_overlay_image(cv2_image_file, mask, base_name, output_path, area_cm
 	cv2.imwrite(os.path.join(output_path, output_filename), visual_check)
 
 
-def get_area_by_background_exclusion(cv2_image_file, dpi):
-
+def get_area_by_background_exclusion(cv2_image_file, dpi, filter_contours=True):
+	"""
+    Calculates foreground area.
+    If filter_contours is True, it only counts pixels inside the largest detected shape (the paper).
+    """
 	# Convert to HSV
 	hsv = cv2.cvtColor(cv2_image_file, cv2.COLOR_BGR2HSV)
 
-	# Define the Background Range
+	# Define the Background (Paper) Range
 	background_lower_range = np.array([BGR_LOWER_HUE, BGR_LOWER_SAT, BGR_LOWER_VAL])
 	background_upper_range = np.array([BGR_UPPER_HUE, BGR_UPPER_SAT, BGR_UPPER_VAL])
 
-	# Create the Background Mask
+	# Create the Paper Mask
 	paper_mask = cv2.inRange(hsv, background_lower_range, background_upper_range)
 
-	# Invert the mask
-	mask = cv2.bitwise_not(paper_mask)
+	#  Determine the final mask based on the parameter
+	if filter_contours:
+		# Find all external shapes in the paper mask
+		contours, _ = cv2.findContours(paper_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+		if contours:
+			# Identify the largest shape (the sheet of paper)
+			largest_contour = max(contours, key=cv2.contourArea)
+
+			# Create a solid "Paper Only" mask
+			paper_roi = np.zeros_like(paper_mask)
+			cv2.drawContours(paper_roi, [largest_contour], -1, 255, thickness=cv2.FILLED)
+
+			# Final mask: (Not Paper Color) AND (Inside Paper Shape)
+			not_paper_color = cv2.bitwise_not(paper_mask)
+			final_mask = cv2.bitwise_and(not_paper_color, paper_roi)
+		else:
+			# Fallback if no contours are found
+			final_mask = cv2.bitwise_not(paper_mask)
+	else:
+		# Standard logic: Just invert the paper mask globally
+		final_mask = cv2.bitwise_not(paper_mask)
 
 	# Calculate Area
-	total_pixels = np.sum(mask == 255)
+	# Formula: Area = Total Pixels * (2.54 / DPI)^2
+	total_pixels = np.sum(final_mask == 255)
 	pixel_to_cm2 = (2.54 / dpi) ** 2
 	total_area_cm2 = total_pixels * pixel_to_cm2
 
-	return total_area_cm2, mask
+	return total_area_cm2, final_mask
 
 
 def export_results_to_csv(data_dict, output_folder):
@@ -214,7 +242,7 @@ def calculate_area(input_folder_path, output_folder_path):
 		base_name = os.path.splitext(os.path.basename(image_file_path))[0]
 		dpi = get_dpi(image_file_path)
 		cv2_image = cv2.imread(image_file_path)
-		total_area, mask = get_area_by_background_exclusion(cv2_image, dpi)
+		total_area, mask = get_area_by_background_exclusion(cv2_image, dpi, FILTER_CONTOURS)
 		result_dictionary[base_name] = total_area
 		print(f"{base_name} | Total Area: {total_area:.4f} cm2")
 		generate_overlay_image(cv2_image, mask, base_name, output_folder_path, total_area, dpi, settings_list)
@@ -259,7 +287,8 @@ def get_entry_field_settings():
 		'upper_val':bgr_upper_val_entry.get(),
 		'red':color_red_entry.get(),
 		'green':color_green_entry.get(),
-		'blue':color_blue_entry.get()
+		'blue':color_blue_entry.get(),
+		'filter_contours':filter_contours_var.get()
 	}
 	return settings
 
@@ -370,35 +399,48 @@ bgr_upper_val_entry = tk.Entry(middle_frame, width=15, font=("Arial", 12))
 bgr_upper_val_entry.insert(0, str(BGR_UPPER_VAL))
 bgr_upper_val_entry.grid(row=5, column=2, padx=10, pady=10)
 
+filter_contours_var = tk.BooleanVar(value=True)
+
+filter_contours_checkbutton = tk.Checkbutton(
+    middle_frame,
+    text="Filter out Non-Paper Edges",
+    variable=filter_contours_var,
+    onvalue=True,
+    offvalue=False,
+    font=("Arial", 10)
+)
+
+filter_contours_checkbutton.grid(row=6, column=0, padx=10, pady=10, columnspan=3)
+
 
 label_color = tk.Label(middle_frame, text="Result Image Overlay Color", justify="center", font=("Arial", 14, "bold"))
-label_color.grid(row=6, column=0, padx=10, pady=10, columnspan=3)
+label_color.grid(row=7, column=0, padx=10, pady=10, columnspan=3)
 
 
 label_color_red = tk.Label(middle_frame, text="Red", justify="center")
-label_color_red.grid(row=7, column=0, padx=10, pady=10)
+label_color_red.grid(row=8, column=0, padx=10, pady=10)
 
 label_color_green = tk.Label(middle_frame, text="Green", justify="center")
-label_color_green.grid(row=7, column=1, padx=10, pady=10)
+label_color_green.grid(row=8, column=1, padx=10, pady=10)
 
 label_color_blue = tk.Label(middle_frame, text="Blue",  justify="center")
-label_color_blue.grid(row=7, column=2, padx=10, pady=10)
+label_color_blue.grid(row=8, column=2, padx=10, pady=10)
 
 
 color_red_entry = tk.Entry(middle_frame, width=15, font=("Arial", 12))
 color_red_entry.insert(0, str(COLOR_RED))
-color_red_entry.grid(row=8, column=0, padx=10, pady=10)
+color_red_entry.grid(row=9, column=0, padx=10, pady=10)
 
 color_green_entry = tk.Entry(middle_frame, width=15, font=("Arial", 12))
 color_green_entry.insert(0, str(COLOR_GREEN))
-color_green_entry.grid(row=8, column=1, padx=10, pady=10)
+color_green_entry.grid(row=9, column=1, padx=10, pady=10)
 
 color_blue_entry = tk.Entry(middle_frame, width=15, font=("Arial", 12))
 color_blue_entry.insert(0, str(COLOR_BLUE))
-color_blue_entry.grid(row=8, column=2, padx=10, pady=10)
+color_blue_entry.grid(row=9, column=2, padx=10, pady=10)
 
 
-empty_label.grid(row=9, column=0, padx=10, pady=10)
+empty_label.grid(row=10, column=0, padx=10, pady=10)
 
 
 middle_frame.grid(row=1, column=0)
